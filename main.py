@@ -1193,29 +1193,29 @@ def welcome_keyboard(is_admin_user=False):
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     # Row 1 — primary action + Temp Mail
     kb.add(
-        KeyboardButton(f"📲 {stylish('Get Number')}"),
-        KeyboardButton(f"📬 {stylish('Temp Mail')}"),
+        KeyboardButton(f"📱 {stylish('Get Number')}"),
+        KeyboardButton(f"✉️ {stylish('Temp Mail')}"),
     )
     # Row 2 — Balance + custom range
     kb.add(
-        KeyboardButton(f"🪪 {stylish('Balance')}"),
-        KeyboardButton(f"🧿 {stylish('CUSTOM RANGE')}"),
+        KeyboardButton(f"💰 {stylish('Balance')}"),
+        KeyboardButton(f"🎯 {stylish('Custom Range')}"),
     )
-    # Row 3 — Support + profile (Withdraw now lives inside Balance)
+    # Row 3 — Support + profile
     kb.add(
-        KeyboardButton(f"🎧 {stylish('Support')}"),
-        KeyboardButton(f"🧑 {stylish('Profile')}"),
+        KeyboardButton(f"💬 {stylish('Support')}"),
+        KeyboardButton(f"👤 {stylish('Profile')}"),
     )
     # Row 4 — live traffic + refer
     kb.add(
-        KeyboardButton(f"📊 {stylish('Traffic')}"),
+        KeyboardButton(f"📈 {stylish('Traffic')}"),
         KeyboardButton(f"🎁 {stylish('Refer')}"),
     )
     # Row 5 — Leaderboard (admin controlled)
     if is_leaderboard_enabled():
         kb.add(KeyboardButton(f"🏆 {stylish('Leaderboard')}"))
     if is_admin_user:
-        kb.add(KeyboardButton(f"🎛️ {stylish('Admin Panel')}"))
+        kb.add(KeyboardButton(f"👑 {stylish('Admin Panel')}"))
     return kb
 
 
@@ -1980,23 +1980,22 @@ def _send_support_message(chat_id):
         bot.send_message(chat_id, f"☎ <b>{stylish('Support')}:</b> {_html.escape(link)}")
 
 
+
+def _resolve_panel_link():
+    return normalize_link(get_setting("panel_link", "") or get_setting("number_panel_link", "") or get_setting("bot_link", "") or "https://t.me")
+
+def _resolve_channel_link():
+    return normalize_link(get_setting("main_channel_link", "") or get_setting("auto_sms_channel_link", "") or get_setting("channel_link", "") or "https://t.me")
+
 def otp_group_keyboard():
-    """Buttons shown on forwarded OTP cards."""
-    panel_link = normalize_link(get_setting("panel_link", ""))
-    dev_link = get_setting("dev_link", "")
-    channel_link = normalize_link(get_setting("main_channel_link", ""))
-    kb = InlineKeyboardMarkup(row_width=1)
-    has_btn = False
-    if panel_link:
-        kb.add(InlineKeyboardButton(f"👑 {stylish('GO TO PANEL')} 👑", url=panel_link))
-        has_btn = True
-    if channel_link:
-        kb.add(InlineKeyboardButton(f"📣 {stylish('GO TO CHANNEL')} 📣", url=channel_link))
-        has_btn = True
-    if dev_link:
-        kb.add(InlineKeyboardButton(f"⚡ {stylish('BOT DEVELOPER')} ⚡", url=dev_link))
-        has_btn = True
-    return kb if has_btn else None
+    """Buttons shown on forwarded OTP cards: GO TO PANEL and GO TO CHANNEL."""
+    panel_link = _resolve_panel_link()
+    channel_link = _resolve_channel_link()
+    kb = InlineKeyboardMarkup(row_width=2)
+    btn_panel = InlineKeyboardButton("🌐 GO TO PANEL", url=panel_link if panel_link.startswith("http") else "https://t.me")
+    btn_channel = InlineKeyboardButton("📢 GO TO CHANNEL", url=channel_link if channel_link.startswith("http") else "https://t.me")
+    kb.row(btn_panel, btn_channel)
+    return kb
 
 
 def build_balance_text(stats: dict) -> str:
@@ -2563,25 +2562,14 @@ def _auto_sms_status_text() -> str:
 
 
 def auto_sms_inline_keyboard():
-    """Buttons under an Auto SMS card: GO TO BOT + GO TO CHANNEL (admin links)."""
-    bot_link = normalize_link(get_setting("auto_sms_bot_link", "") or get_setting("bot_link", ""))
-    channel_link = normalize_link(
-        get_setting("auto_sms_channel_link", "") or get_setting("main_channel_link", "")
-    )
-    panel_link = normalize_link(get_setting("panel_link", ""))
+    """Buttons under an Auto SMS card: GO TO PANEL + GO TO CHANNEL."""
+    panel_link = _resolve_panel_link()
+    channel_link = _resolve_channel_link()
     kb = InlineKeyboardMarkup(row_width=2)
-    row = []
-    if bot_link:
-        row.append(InlineKeyboardButton(f"🤖 {stylish('GO TO BOT')}", url=bot_link))
-    if channel_link:
-        row.append(InlineKeyboardButton(f"📣 {stylish('GO TO CHANNEL')}", url=channel_link))
-    has = bool(row)
-    if row:
-        kb.add(*row)
-    if panel_link:
-        kb.add(InlineKeyboardButton(f"👑 {stylish('NUMBER PANEL')} 👑", url=panel_link))
-        has = True
-    return kb if has else None
+    btn_panel = InlineKeyboardButton("🌐 GO TO PANEL", url=panel_link if panel_link.startswith("http") else "https://t.me")
+    btn_channel = InlineKeyboardButton("📢 GO TO CHANNEL", url=channel_link if channel_link.startswith("http") else "https://t.me")
+    kb.row(btn_panel, btn_channel)
+    return kb
 
 
 # ─── AUTO SMS ENGINE (top range / top country of the connected panel) ─────────
@@ -2680,21 +2668,21 @@ def _build_auto_sms_card(number: str, msg_text: str, panel_name: str = "") -> st
     flag, cname = extract_flag_from_name(country_full)
     otp_code = extract_otp(msg_text) or "N/A"
     service = detect_service_from_message(msg_text)
-    sep = "━" * 30
+    sep = "━" * 28
     return (
-        f"⚡ {sep}\n"
-        f"   🧿  {stylish('OTP RECEIVED')}\n"
-        f"{sep}\n\n"
+        f"✨ {sep} ✨\n"
+        f"        ⚡ <b>NEW OTP RECEIVED</b> ⚡\n"
+        f"✨ {sep} ✨\n\n"
         f"<blockquote>"
-        f"❖ 🗺 {stylish('COUNTRY')}  ➤  {flag} {cname}\n"
-        f"❖ 📟 {stylish('SERVICE')}  ➤  {service}\n"
-        f"❖ 📡 {stylish('RANGE')}    ➤  <code>{masked}</code>\n"
-        f"❖ 🔢 {stylish('OTP CODE')} ➤  <code>{otp_code}</code>"
+        f"🌍 <b>Country:</b> {flag} {cname}\n"
+        f"📱 <b>Service:</b> {service}\n"
+        f"📡 <b>Range:</b> <code>{masked}</code>\n"
+        f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>"
         f"</blockquote>\n\n"
-        f"📬 {stylish('FULL SMS')}\n"
+        f"💬 <b>Full SMS:</b>\n"
         f"<blockquote>{_html.escape(str(msg_text))}</blockquote>\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"🔷 {stylish('POWERED BY')} <b>{stylish(_powered_by())}</b>"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>Powered By:</b> <b>{_html.escape(_powered_by())}</b>"
     )
 
 
@@ -2910,20 +2898,20 @@ def _forward_otp(msg_text: str, number: str, alloc: dict = None):
         else:
             masked = raw_num
         country_display = f"{country_flag} {country_name}".strip() if country_name else raw_num
-        sep = "━" * 30
+        sep = "━" * 28
         fwd_msg = (
-            f"⚡ {sep}\n"
-            f"   🧿  {stylish('OTP RECEIVED')}\n"
-            f"{sep}\n\n"
+            f"✨ {sep} ✨\n"
+            f"        ⚡ <b>NEW OTP RECEIVED</b> ⚡\n"
+            f"✨ {sep} ✨\n\n"
             f"<blockquote>"
-            f"❖ 🗺 {stylish('COUNTRY')}  ➤  {country_display}\n"
-            f"❖ 📟 {stylish('SERVICE')}  ➤  {service_name.upper() if service_name else 'N/A'}\n"
-            f"❖ 📡 {stylish('RANGE')}    ➤  <code>{masked}</code>\n"
-            f"❖ 🔢 {stylish('OTP CODE')} ➤  <code>{otp_code if otp_code else 'N/A'}</code>"
+            f"🌍 <b>Country:</b> {country_display}\n"
+            f"📱 <b>Service:</b> {service_name.upper() if service_name else 'N/A'}\n"
+            f"📡 <b>Range:</b> <code>{masked}</code>\n"
+            f"🔑 <b>OTP Code:</b> <code>{otp_code if otp_code else 'N/A'}</code>"
             f"</blockquote>\n\n"
-            f"📬 {stylish('FULL SMS')}\n"
+            f"💬 <b>Full SMS:</b>\n"
             f"<blockquote>{_html.escape(str(msg_text))}</blockquote>\n"
-            f"━━━━━━━━━━━━━━━━━"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
         grp_kb = otp_group_keyboard()
         if grp_kb:
@@ -5946,13 +5934,13 @@ def handle_text(message):
             return
 
     # ── TRAFFIC button ─────────────────────────────────────────────────────────
-    if text == f"📊 {stylish('Traffic')}":
+    if text in (f"📈 {stylish('Traffic')}", f"📊 {stylish('Traffic')}"):
         traffic_text = _build_traffic_text()
         bot.send_message(chat_id, traffic_text, parse_mode="HTML", reply_markup=_traffic_inline_keyboard())
         return
 
     # ── CUSTOM RANGE button (reply keyboard) ──────────────────────────────────
-    if text == f"🧿 {stylish('CUSTOM RANGE')}":
+    if text in (f"🎯 {stylish('Custom Range')}", f"🎯 {stylish('CUSTOM RANGE')}", f"🧿 {stylish('CUSTOM RANGE')}"):
         if not is_member(user.id):
             bot.send_message(chat_id, _join_prompt_text(), reply_markup=join_keyboard())
             return
@@ -5973,11 +5961,11 @@ def handle_text(message):
         bot.send_message(chat_id, f"📟 <b>{stylish('Select a Service')}:</b>", reply_markup=kb)
         return
 
-    elif text == f"📬 {stylish('Temp Mail')}":
+    elif text in (f"✉️ {stylish('Temp Mail')}", f"📬 {stylish('Temp Mail')}"):
         _send_generated_temp_mail(chat_id, user.id)
         return
 
-    elif text == f"🎧 {stylish('Support')}":
+    elif text in (f"💬 {stylish('Support')}", f"🎧 {stylish('Support')}"):
         _send_support_message(chat_id)
         return
 
@@ -6002,12 +5990,12 @@ def handle_text(message):
         )
         return
 
-    elif text == f"🪪 {stylish('Balance')}":
+    elif text in (f"💰 {stylish('Balance')}", f"🪪 {stylish('Balance')}"):
         stats = get_wallet_stats(user.id)
         bot.send_message(chat_id, build_balance_text(stats), reply_markup=balance_inline_keyboard())
         return
 
-    elif text == f"🧑 {stylish('Profile')}":
+    elif text in (f"👤 {stylish('Profile')}", f"🧑 {stylish('Profile')}"):
         try:
             upsert_user(user)
             db_user = get_user(user.id)
@@ -6091,7 +6079,7 @@ def handle_text(message):
         _send_welcome(chat_id, first_name, user.id)
         return
 
-    elif text == f"🎛️ {stylish('Admin Panel')}":
+    elif text in (f"👑 {stylish('Admin Panel')}", f"🎛️ {stylish('Admin Panel')}"):
         if not is_admin(user.id):
             return
         admin_states.pop(user.id, None)
