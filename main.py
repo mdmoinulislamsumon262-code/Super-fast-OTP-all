@@ -1529,7 +1529,7 @@ def auto_sms_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     state = "OFF" if is_auto_sms_enabled() else "ON"
     kb.add(KeyboardButton(f"🚀 {stylish('Auto SMS')}: {state}"))
-    kb.add(KeyboardButton(f"🗨 {stylish('Set Auto SMS Group ID')}"))
+    kb.add(KeyboardButton(f"🗨 {stylish('Set Forward Group ID')}"))
     kb.add(KeyboardButton(f"🧹 {stylish('Del Auto SMS Group')}"))
     demo_state = "OFF" if is_demo_sms_enabled() else "ON"
     kb.add(KeyboardButton(f"🧪 {stylish('Demo SMS')}: {demo_state}"))
@@ -2539,25 +2539,47 @@ def _deliver_otp_api(alloc, msg_text: str, dt: str, mhash_val: str):
     return False
 
 
+def get_unified_forward_chat_id() -> str:
+    """Return the single configured destination chat ID/username for both real OTP and Demo/Auto SMS."""
+    fwd = str(get_setting("otp_forward_chat_id", "") or "").strip()
+    if fwd and fwd != "Not set":
+        return fwd
+    auto = str(get_setting("auto_sms_chat_id", "") or "").strip()
+    if auto and auto != "Not set":
+        return auto
+    return ""
+
+
+def set_unified_forward_chat_id(chat_id_val: str):
+    """Save forward chat ID to both settings so real OTP and Demo SMS share the exact same destination."""
+    v = str(chat_id_val).strip()
+    set_setting("otp_forward_chat_id", v)
+    set_setting("auto_sms_chat_id", v)
+
+
+def delete_unified_forward_chat_id():
+    """Delete forward chat ID from all settings."""
+    delete_setting("otp_forward_chat_id")
+    delete_setting("auto_sms_chat_id")
+
+
 _auto_sms_seen = set()
 _auto_sms_lock = threading.Lock()
 
 
 def _auto_sms_status_text() -> str:
     state = "🟩 ON" if is_auto_sms_enabled() else "🟥 OFF"
-    chat = get_setting("auto_sms_chat_id", "Not set")
+    chat = get_unified_forward_chat_id() or "Not set"
     demo = "🟩 ON" if is_demo_sms_enabled() else "🟥 OFF"
     delay = fmt_delay(get_demo_sms_delay())
     return (
-        f"🚀 <b>{stylish('Auto SMS')}</b>\n\n"
+        f"🚀 <b>{stylish('Auto SMS & Demo SMS')}</b>\n\n"
         f"Status: <b>{state}</b>\n"
-        f"🗨 Group/Channel ID: <code>{chat}</code>\n"
+        f"🗨 Forward Group/Channel ID: <code>{chat}</code>\n"
         f"🧪 Demo SMS: <b>{demo}</b>\n"
         f"⏱ Demo Delay: <b>{delay}</b>  (min 3 sec, max 60 min)\n\n"
-        f"<i>Every real SMS/OTP from the connected panels "
-        f"(ZebraSMS, YesMS, StexSMS, FastXOTPs, VoltXSMS) that belongs to the "
-        f"panel's TOP ranges/countries is forwarded here automatically, with "
-        f"GO TO BOT and GO TO CHANNEL buttons.</i>"
+        f"<i>Every real OTP and every Demo SMS will be forwarded to this exact same group with "
+        f"GO TO PANEL and GO TO CHANNEL buttons.</i>"
     )
 
 
@@ -2644,7 +2666,7 @@ def _auto_sms_engine_loop():
     idx = 0
     while True:
         try:
-            if is_auto_sms_enabled() and str(get_setting("auto_sms_chat_id", "") or "").strip():
+            if is_auto_sms_enabled() and get_unified_forward_chat_id():
                 ranges, _countries = _refresh_auto_sms_targets()
                 if ranges:
                     rid = ranges[idx % len(ranges)]
@@ -2705,10 +2727,10 @@ def detect_service_from_message(msg_text: str) -> str:
 
 
 def _auto_forward_panel_sms(panel_name: str, number: str, msg_text: str, otp_id: str = ""):
-    """Forward EVERY real SMS captured from a panel to the Auto SMS group."""
+    """Forward EVERY real SMS captured from a panel to the unified forward group."""
     if not is_auto_sms_enabled():
         return
-    target = str(get_setting("auto_sms_chat_id", "") or "").strip()
+    target = get_unified_forward_chat_id()
     if not target or not number or not msg_text:
         return
     try:
@@ -2731,12 +2753,13 @@ def _auto_forward_panel_sms(panel_name: str, number: str, msg_text: str, otp_id:
                 _auto_sms_seen.add(key)
                 return
     try:
-        kb = auto_sms_inline_keyboard()
+        kb = otp_group_keyboard()
         card = _build_auto_sms_card(number, msg_text, panel_name)
+        chat_dest = int(target) if target.lstrip("-").isdigit() else target
         if kb:
-            bot.send_message(int(target), card, reply_markup=kb)
+            bot.send_message(chat_dest, card, reply_markup=kb)
         else:
-            bot.send_message(int(target), card)
+            bot.send_message(chat_dest, card)
         # Only mark delivered after Telegram accepted the message.
         with _auto_sms_lock:
             with get_conn() as conn:
@@ -2840,17 +2863,18 @@ def _build_demo_sms():
 
 
 def _send_demo_sms() -> bool:
-    target = str(get_setting("auto_sms_chat_id", "") or "").strip()
+    target = get_unified_forward_chat_id()
     if not target:
         return False
     number, msg_text = _build_demo_sms()
     try:
-        kb = auto_sms_inline_keyboard()
+        kb = otp_group_keyboard()
         card = _build_auto_sms_card(number, msg_text, "")
+        chat_dest = int(target) if target.lstrip("-").isdigit() else target
         if kb:
-            bot.send_message(int(target), card, reply_markup=kb)
+            bot.send_message(chat_dest, card, reply_markup=kb)
         else:
-            bot.send_message(int(target), card)
+            bot.send_message(chat_dest, card)
         return True
     except Exception as e:
         logger.warning("Demo SMS send error: %s", e)
@@ -2858,13 +2882,14 @@ def _send_demo_sms() -> bool:
 
 
 def _demo_sms_loop():
-    """Send one demo OTP to the Auto SMS group every <admin delay> seconds."""
+    """Send one demo OTP to the unified forward group every <admin delay> seconds."""
     logger.info("Demo SMS engine started.")
     next_at = 0.0
     while True:
         try:
-            if is_auto_sms_enabled() and is_demo_sms_enabled():
-                if time.time() >= next_at:
+            if is_demo_sms_enabled():
+                target = get_unified_forward_chat_id()
+                if target and time.time() >= next_at:
                     if _send_demo_sms():
                         logger.info("Demo SMS sent (next in %ss).", get_demo_sms_delay())
                     next_at = time.time() + get_demo_sms_delay()
@@ -2876,8 +2901,8 @@ def _demo_sms_loop():
 
 
 def _forward_otp(msg_text: str, number: str, alloc: dict = None):
-    """Forward OTP to the configured otp_forward_chat_id in stylish format."""
-    fwd_id = get_setting("otp_forward_chat_id")
+    """Forward OTP to the unified forward chat ID in stylish format."""
+    fwd_id = get_unified_forward_chat_id()
     if not fwd_id:
         return
     try:
@@ -2914,10 +2939,11 @@ def _forward_otp(msg_text: str, number: str, alloc: dict = None):
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
         grp_kb = otp_group_keyboard()
+        chat_dest = int(fwd_id) if fwd_id.lstrip("-").isdigit() else fwd_id
         if grp_kb:
-            bot.send_message(int(fwd_id), fwd_msg, reply_markup=grp_kb)
+            bot.send_message(chat_dest, fwd_msg, reply_markup=grp_kb)
         else:
-            bot.send_message(int(fwd_id), fwd_msg)
+            bot.send_message(chat_dest, fwd_msg)
     except Exception as e:
         logger.warning(f"OTP forward error: {e}")
 
@@ -4181,12 +4207,12 @@ def handle_text(message):
             # ── AUTO SMS SETTINGS ─────────────────────────────────────────────
             if step == "aauto_chat_id":
                 raw = text.strip()
-                if not re.fullmatch(r"-?\d{5,20}", raw):
-                    bot.send_message(chat_id, "⛔ Invalid chat ID.", reply_markup=cancel_keyboard())
+                if not (re.fullmatch(r"-?\d{5,20}", raw) or raw.startswith("@")):
+                    bot.send_message(chat_id, "⛔ Invalid chat ID (e.g. -1001234567890 or @groupname).", reply_markup=cancel_keyboard())
                     return
-                set_setting("auto_sms_chat_id", raw)
+                set_unified_forward_chat_id(raw)
                 admin_states.pop(user.id, None)
-                bot.send_message(chat_id, _auto_sms_status_text(), reply_markup=auto_sms_keyboard())
+                bot.send_message(chat_id, f"✔️ Forward Chat ID saved: <code>{raw}</code> (real OTP & Demo SMS both go here)\n\n" + _auto_sms_status_text(), reply_markup=auto_sms_keyboard())
                 return
 
             if step == "aauto_demo_delay":
@@ -4398,12 +4424,12 @@ def handle_text(message):
             # ── OTHERS LINK: OTP Forward ID (Task 4) ─────────────────────────
             elif step == "aset_ol_otp_fwd":
                 chat_id_val = text.strip()
-                if not re.match(r'^-?\d+$', chat_id_val):
-                    bot.send_message(chat_id, "⛔ Please send a valid numeric Chat ID (e.g. -1001234567890).", reply_markup=cancel_keyboard())
+                if not (re.match(r'^-?\d+$', chat_id_val) or chat_id_val.startswith("@")):
+                    bot.send_message(chat_id, "⛔ Please send a valid Chat ID (e.g. -1001234567890) or @username.", reply_markup=cancel_keyboard())
                     return
-                set_setting("otp_forward_chat_id", chat_id_val)
+                set_unified_forward_chat_id(chat_id_val)
                 admin_states.pop(user.id, None)
-                bot.send_message(chat_id, f"✔️ OTP Forward Chat ID saved: <code>{chat_id_val}</code>", reply_markup=others_link_keyboard())
+                bot.send_message(chat_id, f"✔️ Forward Chat ID saved: <code>{chat_id_val}</code> (both real OTP and Demo SMS go here)", reply_markup=others_link_keyboard())
                 return
 
             # ── OTHERS LINK: Bot Name ─────────────────────────────────────────
@@ -4928,7 +4954,7 @@ def handle_text(message):
             support = get_setting("support_link", "Not set")
             otp_grp = get_setting("otp_group_link", "Not set")
             pmt_id = get_setting("payment_forward_chat_id", "Not set")
-            otp_fwd = get_setting("otp_forward_chat_id", "Not set")
+            otp_fwd = get_unified_forward_chat_id() or "Not set"
             bot.send_message(
                 chat_id,
                 f"🎛️ <b>Settings</b>\n\n"
@@ -5032,10 +5058,10 @@ def handle_text(message):
 
         elif text in (f"🚀 {stylish('Auto SMS')}: ON", f"🚀 {stylish('Auto SMS')}: OFF"):
             new_val = "0" if is_auto_sms_enabled() else "1"
-            if new_val == "1" and not get_setting("auto_sms_chat_id", ""):
+            if new_val == "1" and not get_unified_forward_chat_id():
                 bot.send_message(
                     chat_id,
-                    f"⛔ {stylish('Set the Auto SMS Group/Channel ID first.')}",
+                    f"⛔ {stylish('Set the Forward Group/Channel ID first.')}",
                     reply_markup=auto_sms_keyboard(),
                 )
                 return
@@ -5043,7 +5069,7 @@ def handle_text(message):
             bot.send_message(chat_id, _auto_sms_status_text(), reply_markup=auto_sms_keyboard())
             return
 
-        elif text == f"🗨 {stylish('Set Auto SMS Group ID')}":
+        elif text == f"🗨 {stylish('Set Forward Group ID')}":
             admin_states[user.id] = {"step": "aauto_chat_id", "data": {}}
             bot.send_message(
                 chat_id,
@@ -5054,16 +5080,14 @@ def handle_text(message):
 
         elif text in (f"🧪 {stylish('Demo SMS')}: ON", f"🧪 {stylish('Demo SMS')}: OFF"):
             new_val = "0" if is_demo_sms_enabled() else "1"
-            if new_val == "1" and not get_setting("auto_sms_chat_id", ""):
+            if new_val == "1" and not get_unified_forward_chat_id():
                 bot.send_message(
                     chat_id,
-                    f"⛔ {stylish('Set the Auto SMS Group/Channel ID first.')}",
+                    f"⛔ {stylish('Set the Forward Group/Channel ID first.')}",
                     reply_markup=auto_sms_keyboard(),
                 )
                 return
             set_setting("auto_sms_demo_enabled", new_val)
-            if new_val == "1":
-                set_setting("auto_sms_enabled", "1")
             bot.send_message(chat_id, _auto_sms_status_text(), reply_markup=auto_sms_keyboard())
             return
 
@@ -5090,10 +5114,10 @@ def handle_text(message):
             return
 
         elif text == f"🧹 {stylish('Del Auto SMS Group')}":
-            delete_setting("auto_sms_chat_id")
+            delete_unified_forward_chat_id()
             set_setting("auto_sms_enabled", "0")
             set_setting("auto_sms_demo_enabled", "0")
-            bot.send_message(chat_id, f"✔️ {stylish('Auto SMS group removed.')}", reply_markup=auto_sms_keyboard())
+            bot.send_message(chat_id, f"✔️ {stylish('Forward group removed.')}", reply_markup=auto_sms_keyboard())
             return
 
         # ── BACKUP MENU ──────────────────────────────────────────────────
@@ -5221,7 +5245,7 @@ def handle_text(message):
             dev_lnk = get_setting("dev_link", "Not set")
             main_channel = get_setting("main_channel_link", "Not set")
             pmt_id = get_setting("payment_forward_chat_id", "Not set")
-            otp_fwd = get_setting("otp_forward_chat_id", "Not set")
+            otp_fwd = get_unified_forward_chat_id() or "Not set"
             bn = get_setting("bot_name", "OTP BOT")
             pw = get_setting("powered_by", "সুমন")
             bot.send_message(
@@ -5374,8 +5398,8 @@ def handle_text(message):
             return
 
         elif text == f"🧹 {stylish('Del OTP Fwd')}":
-            delete_setting("otp_forward_chat_id")
-            bot.send_message(chat_id, "✔️ OTP Forward ID removed.", reply_markup=others_link_keyboard())
+            delete_unified_forward_chat_id()
+            bot.send_message(chat_id, "✔️ OTP & Demo Forward ID removed.", reply_markup=others_link_keyboard())
             return
 
         elif text == f"🦾 {stylish('Bot Name')}":
